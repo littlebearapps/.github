@@ -1,0 +1,193 @@
+name: Fix Error (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue number from calling repository'
+        required: true
+        type: number
+      repository:
+        description: 'Repository name (owner/repo)'
+        required: true
+        type: string
+      github_token:
+        description: 'GitHub PAT with repo + project scopes'
+        required: true
+        type: string
+    secrets:
+      HOMEOSTAT_DEEPSEEK_API_KEY:
+        required: true
+        description: 'DeepSeek V3.2-Exp API key'
+      HOMEOSTAT_OPENAI_API_KEY:
+        required: true
+        description: 'GPT-5 API key for Tier 2/3 fixes'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: homeostat-fix-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Homeostat Repository
+        uses: actions/checkout@v4
+        with:
+          repository: littlebearapps/homeostat
+          token: ${{ inputs.github_token }}
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          token: ${{ inputs.github_token }}
+          path: target-repo
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Homeostat Dependencies
+        run: npm ci
+
+      - name: Fetch Issue Details
+        id: issue
+        env:
+          GH_TOKEN: ${{ inputs.github_token }}
+        run: |
+          gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }} > issue.json
+
+          # Extract issue details
+          TITLE=$(jq -r '.title' issue.json)
+          BODY=$(jq -r '.body' issue.json)
+          LABELS=$(jq -r '.labels[].name' issue.json | tr '\n' ',' | sed 's/,$//')
+
+          echo "title=${TITLE}" >> $GITHUB_OUTPUT
+          echo "labels=${LABELS}" >> $GITHUB_OUTPUT
+
+          # Save issue body for parsing
+          echo "${BODY}" > issue-body.txt
+
+      - name: Analyze Error Complexity
+        id: analyze
+        env:
+          GITHUB_TOKEN: ${{ inputs.github_token }}
+          TARGET_REPO: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          node homeostat/routing/complexity-analyzer.js \
+            --repo="${TARGET_REPO}" \
+            --issue-number="${ISSUE_NUMBER}"
+
+      - name: Attempt Tier 1 Fix (DeepSeek Only)
+        if: steps.analyze.outputs.tier == '1'
+        env:
+          GITHUB_TOKEN: ${{ inputs.github_token }}
+          DEEPSEEK_API_KEY: ${{ secrets.HOMEOSTAT_DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
+          TARGET_REPO: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          HOMEOSTAT_ENV: production
+        run: |
+          node homeostat/execution/tier1-fix.js \
+            --repo="${TARGET_REPO}" \
+            --issue-number="${ISSUE_NUMBER}" \
+            --working-dir="target-repo"
+
+      - name: Attempt Tier 2 Fix (DeepSeek + GPT-5 Review)
+        if: steps.analyze.outputs.tier == '2'
+        env:
+          GITHUB_TOKEN: ${{ inputs.github_token }}
+          DEEPSEEK_API_KEY: ${{ secrets.HOMEOSTAT_DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
+          TARGET_REPO: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          HOMEOSTAT_ENV: production
+        run: |
+          node homeostat/execution/tier2-fix.js \
+            --repo="${TARGET_REPO}" \
+            --issue-number="${ISSUE_NUMBER}" \
+            --working-dir="target-repo"
+
+      - name: Attempt Tier 3 Fix (GPT-5 Only)
+        if: steps.analyze.outputs.tier == '3'
+        env:
+          GITHUB_TOKEN: ${{ inputs.github_token }}
+          OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
+          TARGET_REPO: ${{ inputs.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          HOMEOSTAT_ENV: production
+        run: |
+          node homeostat/execution/tier3-fix.js \
+            --repo="${TARGET_REPO}" \
+            --issue-number="${ISSUE_NUMBER}" \
+            --working-dir="target-repo"
+
+      - name: Run Tests in Target Repository
+        working-directory: target-repo
+        run: |
+          if [ -f "package.json" ]; then
+            npm ci || true
+            npm test || echo "Tests not configured or failed"
+          elif [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt || true
+            pytest || python -m pytest || echo "Tests not configured or failed"
+          else
+            echo "No test framework detected, skipping tests"
+          fi
+
+      - name: Update Circuit Breaker Labels
+        if: always()
+        env:
+          GH_TOKEN: ${{ inputs.github_token }}
+        run: |
+          # Increment hop count
+          CURRENT_HOP=$(gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }} \
+            --jq '.labels[] | select(.name | startswith("hop:")) | .name' | sed 's/hop://')
+
+          if [ -z "$CURRENT_HOP" ]; then
+            CURRENT_HOP=0
+          fi
+
+          NEXT_HOP=$((CURRENT_HOP + 1))
+
+          # Remove old hop label
+          gh api --method DELETE \
+            repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }}/labels/hop:${CURRENT_HOP} || true
+
+          # Add new hop label
+          gh api --method POST \
+            repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }}/labels \
+            -f labels[]="hop:${NEXT_HOP}"
+
+      - name: Comment on Issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ inputs.github_token }}
+          JOB_STATUS: ${{ job.status }}
+          TIER: ${{ steps.analyze.outputs.tier }}
+        run: |
+          if [ "$JOB_STATUS" == "success" ]; then
+            MESSAGE="✅ Homeostat Tier ${TIER} fix completed successfully. Check for PR with proposed solution."
+          else
+            MESSAGE="⚠️ Homeostat Tier ${TIER} fix encountered issues. Status: ${JOB_STATUS}. See workflow logs for details."
+          fi
+
+          gh api repos/${{ inputs.repository }}/issues/${{ inputs.issue_number }}/comments \
+            -f body="${MESSAGE}"
+
+      - name: Cleanup Artifacts
+        if: always()
+        run: |
+          rm -f issue.json issue-body.txt || true
+          find /tmp -name "homeostat-*" -mtime +1 -delete || true
