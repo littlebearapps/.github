@@ -1,0 +1,16 @@
+name: Test Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      test_message:
+        description: 'Test message'
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Test
+        run: echo "✅ Reusable workflow called successfully! Message: ${{ inputs.test_message }}"
