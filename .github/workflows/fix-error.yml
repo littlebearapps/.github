@@ -81,11 +81,10 @@ jobs:
         id: analyze
         env:
           GITHUB_TOKEN: ${{ secrets.repo_token }}
-          TARGET_REPO: ${{ inputs.repository }}
+          GITHUB_REPOSITORY: ${{ inputs.repository }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
         run: |
           node homeostat/routing/complexity-analyzer.js \
-            --repo="${TARGET_REPO}" \
             --issue-number="${ISSUE_NUMBER}"
 
       - name: Attempt Tier 1 Fix (DeepSeek Only)
