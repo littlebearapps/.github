@@ -82,10 +82,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.repo_token }}
           GITHUB_REPOSITORY: ${{ inputs.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
         run: |
-          node homeostat/routing/complexity-analyzer.js \
-            --issue-number="${ISSUE_NUMBER}"
+          node homeostat/routing/complexity-analyzer.js --issue-number ${{ inputs.issue_number }}
 
       - name: Attempt Tier 1 Fix (DeepSeek Only)
         if: steps.analyze.outputs.tier == '1'
