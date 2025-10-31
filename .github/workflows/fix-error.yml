@@ -89,45 +89,33 @@ jobs:
         if: steps.analyze.outputs.tier == '1'
         env:
           GITHUB_TOKEN: ${{ secrets.repo_token }}
+          GITHUB_REPOSITORY: ${{ inputs.repository }}
           DEEPSEEK_API_KEY: ${{ secrets.HOMEOSTAT_DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
-          TARGET_REPO: ${{ inputs.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
           HOMEOSTAT_ENV: production
         run: |
-          node homeostat/execution/tier1-fix.js \
-            --repo="${TARGET_REPO}" \
-            --issue-number="${ISSUE_NUMBER}" \
-            --working-dir="target-repo"
+          node homeostat/execution/tier1-fix.js --issue-number ${{ inputs.issue_number }}
 
       - name: Attempt Tier 2 Fix (DeepSeek + GPT-5 Review)
         if: steps.analyze.outputs.tier == '2'
         env:
           GITHUB_TOKEN: ${{ secrets.repo_token }}
+          GITHUB_REPOSITORY: ${{ inputs.repository }}
           DEEPSEEK_API_KEY: ${{ secrets.HOMEOSTAT_DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
-          TARGET_REPO: ${{ inputs.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
           HOMEOSTAT_ENV: production
         run: |
-          node homeostat/execution/tier2-fix.js \
-            --repo="${TARGET_REPO}" \
-            --issue-number="${ISSUE_NUMBER}" \
-            --working-dir="target-repo"
+          node homeostat/execution/tier2-fix.js --issue-number ${{ inputs.issue_number }}
 
       - name: Attempt Tier 3 Fix (GPT-5 Only)
         if: steps.analyze.outputs.tier == '3'
         env:
           GITHUB_TOKEN: ${{ secrets.repo_token }}
+          GITHUB_REPOSITORY: ${{ inputs.repository }}
           OPENAI_API_KEY: ${{ secrets.HOMEOSTAT_OPENAI_API_KEY }}
-          TARGET_REPO: ${{ inputs.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
           HOMEOSTAT_ENV: production
         run: |
-          node homeostat/execution/tier3-fix.js \
-            --repo="${TARGET_REPO}" \
-            --issue-number="${ISSUE_NUMBER}" \
-            --working-dir="target-repo"
+          node homeostat/execution/tier3-fix.js --issue-number ${{ inputs.issue_number }}
 
       - name: Run Tests in Target Repository
         working-directory: target-repo
