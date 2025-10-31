@@ -13,4 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Echo Test
-        run: echo "Reusable workflow called successfully! Message: ${{ inputs.test_message }}"
+        env:
+          TEST_MESSAGE: ${{ inputs.test_message }}
+        run: |
+          echo "Reusable workflow called successfully! Message: $TEST_MESSAGE"
