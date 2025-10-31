@@ -160,11 +160,9 @@ jobs:
 
           # Commit changes
           git add .
-          git commit -m "fix: automated fix for issue #${{ inputs.issue_number }}
-
-🤖 Generated with Homeostat (Tier ${{ steps.analyze.outputs.tier }})
-
-Fixes #${{ inputs.issue_number }}"
+          git commit -m "fix: automated fix for issue #${{ inputs.issue_number }}" \
+            -m "Generated with Homeostat (Tier ${{ steps.analyze.outputs.tier }})" \
+            -m "Fixes #${{ inputs.issue_number }}"
 
           # Push branch
           git push -u origin "$BRANCH_NAME"
